@@ -479,12 +479,60 @@ impl<E: Engine, L: LockManager, F: KvFormat> Tikv for Service<E, L, F> {
         RawGetKeyTtlResponse
     );
 
-    handle_request!(
-        raw_compare_and_swap,
-        future_raw_compare_and_swap,
-        RawCasRequest,
-        RawCasResponse
-    );
+    fn raw_compare_and_swap(
+        &mut self,
+        ctx: RpcContext<'_>,
+        req: RawCasRequest,
+        sink: UnarySink<RawCasResponse>,
+    ) {
+        reject_if_cluster_id_mismatch!(req, self, ctx, sink);
+        forward_unary!(self.proxy, raw_compare_and_swap, ctx, req, sink);
+        let begin_instant = Instant::now();
+
+        let source = req.get_context().get_request_source().to_owned();
+        let resource_control_ctx = req.get_context().get_resource_control_context();
+        let mut resource_group_priority = ResourcePriority::unknown;
+        if let Some(resource_manager) = &self.resource_manager {
+            resource_manager.consume_penalty(resource_control_ctx);
+            resource_group_priority =
+                ResourcePriority::from(resource_control_ctx.override_priority);
+        }
+        GRPC_RESOURCE_GROUP_COUNTER_VEC
+            .with_label_values(&[
+                resource_control_ctx.get_resource_group_name(),
+                resource_control_ctx.get_resource_group_name(),
+            ])
+            .inc();
+        let is_delete = req.get_delete();
+        let resp = future_raw_compare_and_swap(&self.storage, req);
+        let task = async move {
+            let resp = resp.await?;
+            let elapsed = begin_instant.saturating_elapsed();
+            sink.success(resp).await?;
+            if is_delete {
+                GRPC_MSG_HISTOGRAM_STATIC
+                    .raw_compare_and_delete
+                    .get(resource_group_priority)
+                    .observe(elapsed.as_secs_f64());
+            } else {
+                GRPC_MSG_HISTOGRAM_STATIC
+                    .raw_compare_and_swap
+                    .get(resource_group_priority)
+                    .observe(elapsed.as_secs_f64());
+            }
+            record_request_source_metrics(source, elapsed);
+            ServerResult::Ok(())
+        }
+        .map_err(|e| {
+            log_net_error!(e, "kv rpc failed";
+                "request" => "raw_compare_and_swap"
+            );
+            GRPC_MSG_FAIL_COUNTER.raw_compare_and_swap.inc();
+        })
+        .map(|_| ());
+
+        ctx.spawn(task);
+    }
 
     handle_request!(
         raw_checksum,

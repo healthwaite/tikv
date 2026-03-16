@@ -51,8 +51,27 @@ command! {
 
 impl CommandExt for RawCompareAndSwap {
     ctx!();
-    tag!(raw_compare_and_swap);
     gen_lock!(key);
+
+    fn tag(&self) -> crate::storage::metrics::CommandKind {
+        if self.delete {
+            crate::storage::metrics::CommandKind::raw_compare_and_delete
+        } else {
+            crate::storage::metrics::CommandKind::raw_compare_and_swap
+        }
+    }
+
+    fn incr_cmd_metric(&self) {
+        if self.delete {
+            crate::storage::metrics::KV_COMMAND_COUNTER_VEC_STATIC
+                .raw_compare_and_delete
+                .inc();
+        } else {
+            crate::storage::metrics::KV_COMMAND_COUNTER_VEC_STATIC
+                .raw_compare_and_swap
+                .inc();
+        }
+    }
 
     fn write_bytes(&self) -> usize {
         if self.delete {

@@ -449,6 +449,7 @@ impl<E: Engine, L: LockManager, F: KvFormat> Storage<E, L, F> {
                 | CommandKind::raw_batch_delete
                 | CommandKind::raw_get_key_ttl
                 | CommandKind::raw_compare_and_swap
+                | CommandKind::raw_compare_and_delete
                 | CommandKind::raw_atomic_store
                 | CommandKind::raw_checksum
         )
@@ -3177,9 +3178,13 @@ impl<E: Engine, L: LockManager, F: KvFormat> Storage<E, L, F> {
         callback: Callback<(Option<Value>, bool)>,
         delete: bool,
     ) -> Result<()> {
-        const CMD: CommandKind = CommandKind::raw_compare_and_swap;
+        let cmd_kind = if delete {
+            CommandKind::raw_compare_and_delete
+        } else {
+            CommandKind::raw_compare_and_swap
+        };
         let api_version = self.api_version;
-        Self::check_api_version(api_version, ctx.api_version, CMD, [&key])?;
+        Self::check_api_version(api_version, ctx.api_version, cmd_kind, [&key])?;
         let cf = Self::rawkv_cf(&cf, api_version)?;
 
         if !F::IS_TTL_ENABLED && ttl != 0 {
@@ -3188,7 +3193,7 @@ impl<E: Engine, L: LockManager, F: KvFormat> Storage<E, L, F> {
         let sched = self.get_scheduler();
         let priority = ctx.get_priority();
         let metadata = TaskMetadata::from_ctx(ctx.get_resource_control_context());
-        self.sched_raw_command(metadata, priority, CMD, async move {
+        self.sched_raw_command(metadata, priority, cmd_kind, async move {
             let key = F::encode_raw_key_owned(key, None);
             let cmd = RawCompareAndSwap::new(
                 cf,
