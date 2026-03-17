@@ -8051,9 +8051,7 @@ mod tests {
         );
 
         // Verify key is deleted.
-        expect_none(
-            block_on(storage.raw_get(ctx.clone(), "".to_string(), key.to_vec())).unwrap(),
-        );
+        expect_none(block_on(storage.raw_get(ctx.clone(), "".to_string(), key.to_vec())).unwrap());
         expect_multi_values(
             vec![],
             block_on(storage.raw_scan(
@@ -8068,7 +8066,7 @@ mod tests {
             .unwrap(),
         );
 
-        // Test 2: delete existing key with wrong previous_value — should fail.
+        // Test 2: delete existing key with incorrect previous_value — should fail.
         // Setup: put "v2".
         let expected = (None, true);
         storage
@@ -8084,7 +8082,7 @@ mod tests {
             .unwrap();
         rx.recv().unwrap();
 
-        // Attempt delete with wrong previous_value "v1" — should fail.
+        // Attempt delete with incorrect previous_value "v1" — should fail.
         let expected = (Some(b"v2".to_vec()), false);
         storage
             .raw_compare_and_delete_atomic(
@@ -8147,9 +8145,7 @@ mod tests {
         );
 
         // Verify key is gone.
-        expect_none(
-            block_on(storage.raw_get(ctx.clone(), "".to_string(), key.to_vec())).unwrap(),
-        );
+        expect_none(block_on(storage.raw_get(ctx.clone(), "".to_string(), key.to_vec())).unwrap());
     }
 
     #[test]
