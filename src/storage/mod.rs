@@ -3141,11 +3141,30 @@ impl<E: Engine, L: LockManager, F: KvFormat> Storage<E, L, F> {
         self.sched_raw_command(metadata, priority, CMD, async move {
             let key = F::encode_raw_key_owned(key, None);
             let cmd = RawCompareAndSwap::new(cf, key, previous_value, value, ttl, api_version, ctx);
-            Self::sched_raw_atomic_command(
-                sched,
-                cmd,
-                Box::new(|res| callback(res.map_err(Error::from))),
-            );
+            Self::sched_raw_atomic_command(sched, cmd, callback);
+        })
+    }
+
+    pub fn raw_compare_and_delete_atomic(
+        &self,
+        ctx: Context,
+        cf: String,
+        key: Vec<u8>,
+        previous_value: Vec<u8>,
+        callback: Callback<(Option<Value>, bool)>,
+    ) -> Result<()> {
+        const CMD: CommandKind = CommandKind::raw_compare_and_delete;
+        let api_version = self.api_version;
+        Self::check_api_version(api_version, ctx.api_version, CMD, [&key])?;
+        let cf = Self::rawkv_cf(&cf, api_version)?;
+
+        let sched = self.get_scheduler();
+        let priority = ctx.get_priority();
+        let metadata = TaskMetadata::from_ctx(ctx.get_resource_control_context());
+        self.sched_raw_command(metadata, priority, CMD, async move {
+            let key = F::encode_raw_key_owned(key, None);
+            let cmd = RawCompareAndDelete::new(cf, key, previous_value, api_version, ctx);
+            Self::sched_raw_atomic_command(sched, cmd, callback);
         })
     }
 
