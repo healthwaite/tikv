@@ -446,6 +446,13 @@ impl<E: Engine, L: LockManager, F: KvFormat> Tikv for Service<E, L, F> {
     );
 
     handle_request!(
+        raw_compare_and_delete,
+        future_raw_compare_and_delete,
+        RawCadRequest,
+        RawCadResponse
+    );
+
+    handle_request!(
         raw_checksum,
         future_raw_checksum,
         RawChecksumRequest,
@@ -2268,6 +2275,43 @@ fn future_raw_compare_and_swap<E: Engine, L: LockManager, F: KvFormat>(
         Ok(resp)
     }
     .right_future()
+}
+
+fn future_raw_compare_and_delete<E: Engine, L: LockManager, F: KvFormat>(
+    storage: &Storage<E, L, F>,
+    mut req: RawCadRequest,
+) -> impl Future<Output = ServerResult<RawCadResponse>> {
+    let (cb, f) = paired_future_callback();
+    let res = storage.raw_compare_and_delete_atomic(
+        req.take_context(),
+        req.take_cf(),
+        req.take_key(),
+        req.take_previous_value(),
+        cb,
+    );
+    async move {
+        let v = match res {
+            Ok(()) => f.await?,
+            Err(e) => Err(e),
+        };
+        let mut resp = RawCadResponse::default();
+        if let Some(err) = extract_region_error(&v) {
+            resp.set_region_error(err);
+        } else {
+            match v {
+                Ok((val, succeed)) => {
+                    if let Some(val) = val {
+                        resp.set_previous_value(val);
+                    } else {
+                        resp.set_previous_not_exist(true);
+                    }
+                    resp.set_succeed(succeed);
+                }
+                Err(e) => resp.set_error(format!("{}", e)),
+            }
+        }
+        Ok(resp)
+    }
 }
 
 fn future_raw_checksum<E: Engine, L: LockManager, F: KvFormat>(
